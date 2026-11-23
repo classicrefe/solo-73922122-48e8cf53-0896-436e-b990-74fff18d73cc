@@ -84,3 +84,34 @@ def test_query_validation_flash(client):
         "end": "2026-01-01", "threshold": "100",
     })
     assert "开始日期不能晚于结束日期" in rv.get_data(as_text=True)
+
+
+def test_web_accepts_threshold_beyond_int64(client):
+    upload(client, "S001", SAMPLE)
+    rv = client.post("/query", data={
+        "station": "S001", "start": "2026-01-01",
+        "end": "2026-01-02", "threshold": str(2 ** 63),
+    })
+    page = rv.get_data(as_text=True)
+    assert rv.status_code == 200
+    assert "9223372036854775808" in page  # 警戒线原样回显
+    # 高于任何读数：达标 0 秒且不报错
+    assert "达标累计秒数（≥ 警戒线）<b>0</b>" in page
+
+
+def test_web_imports_huge_levels_and_keeps_slope(client):
+    max_int = 2 ** 63 - 1
+    data = (
+        f"timestamp_utc,level_mm\n"
+        f"2026-02-01T10:00:00Z,{max_int - 3}\n"
+        f"2026-02-01T11:00:00Z,{max_int - 1}\n"
+    ).encode()
+    rv = upload(client, "BIG", data)
+    assert "导入完成" in rv.get_data(as_text=True)
+    rv = client.post("/query", data={
+        "station": "BIG", "start": "2026-02-01",
+        "end": "2026-02-01", "threshold": str(max_int - 2),
+    })
+    page = rv.get_data(as_text=True)
+    # 大整数斜坡中点之后 1800 秒达标，没有被当成平水
+    assert "1,800" in page

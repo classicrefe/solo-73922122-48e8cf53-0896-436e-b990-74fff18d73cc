@@ -1,32 +1,46 @@
 """Flask 页面：首页、导入、核算查询。"""
+from fractions import Fraction
+
 from flask import (
-    Blueprint, current_app, flash, redirect, render_template, request, url_for,
+    Blueprint, current_app, flash, render_template, request,
 )
 
 from .db import get_db, init_db
+from .exact import round_seconds
 from .importer import ImportError_, import_csv
 from .query import QueryError, run_query
 
 bp = Blueprint("web", __name__)
 
 
+def _format_rational(value, thousands):
+    """按 3 位小数精确舍入后展示；整数不带小数点。"""
+    value = value if isinstance(value, Fraction) else Fraction(str(value))
+    rounded = round_seconds(value)
+    sign = "-" if rounded < 0 else ""
+    thousandths = abs(rounded) * 1000
+    n = thousandths.numerator
+    whole, frac = divmod(n, 1000)
+    whole_text = f"{whole:,}" if thousands else str(whole)
+    if frac == 0:
+        return f"{sign}{whole_text}"
+    frac_text = f"{frac:03d}".rstrip("0")
+    return f"{sign}{whole_text}.{frac_text}"
+
+
 @bp.app_template_filter("secs")
 def fmt_secs(value):
-    """秒数展示：整数不带小数，浮点保留 3 位并去尾零。"""
+    """秒数展示：整数不带小数，否则 3 位小数并去尾零。"""
     if value is None:
         return "—"
-    if isinstance(value, int) or float(value).is_integer():
-        return f"{int(value):,}"
-    return f"{value:,.3f}".rstrip("0").rstrip(".")
+    return _format_rational(value, thousands=True)
 
 
 @bp.app_template_filter("mm")
 def fmt_mm(value):
     if value is None:
         return "—"
-    if float(value).is_integer():
-        return str(int(value))
-    return f"{value:.3f}".rstrip("0").rstrip(".")
+    return _format_rational(value, thousands=False)
 
 
 @bp.route("/")
